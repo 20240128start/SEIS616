@@ -1,0 +1,171 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "CloudFormation template for creating a web environment with ALB and EC2 instances.",
+  "Parameters": {
+    "InstanceType": {
+      "Description": "EC2 instance type",
+      "Type": "String",
+      "AllowedValues": ["t2.micro", "t2.small"],
+      "Default": "t2.micro"
+      },
+    "KeyPair": {
+      "Description": "EC2 KeyPair Name",
+      "Type": "AWS::EC2::KeyPair::KeyName"
+      },
+    "YourIp": {
+      "Description": "Your IP address in CIDR notation",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    }
+  },
+  "Resources": {
+    "EngineeringVpc": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": "10.0.0.0/18",
+        "Tags": [{"Key": "Name", "Value": "EngineeringVpc"}]
+      }
+    },
+    "PublicSubnet1": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {"Ref": "EngineeringVpc"},
+        "CidrBlock": "10.0.0.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [{"Key": "Name", "Value": "PublicSubnet1"}]
+      }
+    },
+    "PublicSubnet2": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {"Ref": "EngineeringVpc"},
+        "CidrBlock": "10.0.1.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [{"Key": "Name", "Value": "PublicSubnet2"}]
+      }
+    },
+    "InternetGateway": {
+      "Type": "AWS::EC2::InternetGateway",
+      "Properties": {
+        "Tags": [{"Key": "Name", "Value": "EngineeringIGW"}]
+      }
+    },
+    "AttachGateway": {
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+      "Properties": {
+        "VpcId": {"Ref": "EngineeringVpc"},
+        "InternetGatewayId": {"Ref": "InternetGateway"}
+      }
+    },
+    "RouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {"Ref": "EngineeringVpc"},
+        "Tags": [{"Key": "Name", "Value": "EngineeringRouteTable"}]
+      }
+    },
+    "PublicRoute": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": {"Ref": "RouteTable"},
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {"Ref": "InternetGateway"}
+      }
+    },
+    "SubnetRouteTableAssociation1": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {"Ref": "PublicSubnet1"},
+        "RouteTableId": {"Ref": "RouteTable"}
+      }
+    },
+  "WebserversSG": {
+    "Type": "AWS::EC2::SecurityGroup",
+    "Properties": {
+      "GroupName": "WebserversSG",
+      "VpcId": {"Ref": "EngineeringVpc"},
+      "SecurityGroupIngress": [
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 22,
+          "ToPort": 22,
+          "CidrIp": {"Ref": "YourIp"}
+        },
+        {
+          "IpProtocol": "tcp",
+          "FromPort": 80,
+          "ToPort": 80,
+          "CidrIp": "0.0.0.0/0"
+        }
+      ]
+    }
+  },
+  "WebServerInstance1": {
+    "Type": "AWS::EC2::Instance",
+    "Properties": {
+      "InstanceType": {"Ref": "InstanceType"},
+      "KeyName": {"Ref": "KeyPair"},
+      "ImageId": "ami-01cc34ab2709337aa",
+      "SubnetId": {"Ref": "PublicSubnet1"},
+      "SecurityGroupIds": [{"Ref": "WebserversSG"}],
+      "UserData": {
+        "Fn::Base64": "#!/bin/bash\nyum update -y\nyum install -y git httpd php\nservice httpd start\nchkconfig httpd on\naws s3 cp s3://seis665-public/index.php /var/www/html/"
+      }
+    }
+  },
+  "WebServerInstance2": {
+    "Type": "AWS::EC2::Instance",
+    "Properties": {
+      "InstanceType": {"Ref": "InstanceType"},
+      "KeyName": {"Ref": "KeyPair"},
+      "ImageId": "ami-01cc34ab2709337aa",
+      "SubnetId": {"Ref": "PublicSubnet2"},
+      "SecurityGroupIds": [{"Ref": "WebserversSG"}],
+      "UserData": {
+        "Fn::Base64": "#!/bin/bash\nyum update -y\nyum install -y git httpd php\nservice httpd start\nchkconfig httpd on\naws s3 cp s3://seis665-public/index.php /var/www/html/"
+      }
+    }
+  },
+  "EngineeringLB": {
+    "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+    "Properties": {
+      "Subnets": [{"Ref": "PublicSubnet1"}, {"Ref": "PublicSubnet2"}],
+      "SecurityGroups": [{"Ref": "WebserversSG"}]
+    }
+  },
+  "Listener": {
+    "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    "Properties": {
+      "DefaultActions": [
+        {
+          "Type": "forward",
+          "TargetGroupArn": {"Ref": "EngineeringWebservers"}
+        }
+      ],
+      "LoadBalancerArn": {"Ref": "EngineeringLB"},
+      "Port": 80,
+      "Protocol": "HTTP"
+    }
+  },
+  "EngineeringWebservers": {
+    "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+    "Properties": {
+      "Port": 80,
+      "Protocol": "HTTP",
+      "VpcId": {"Ref": "EngineeringVpc"},
+      "Targets": [
+        {"Id": {"Ref": "WebServerInstance1"}},
+        {"Id": {"Ref": "WebServerInstance2"}}
+      ]
+    }
+   }
+  },  
+  "Outputs": {
+    "WebUrl": {
+      "Description": "URL of the website",
+      "Value": {"Fn::GetAtt": ["EngineeringLB", "DNSName"]}
+    }
+  }
+}
