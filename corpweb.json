@@ -76,7 +76,10 @@
         "RouteTableId": {"Ref": "RouteTable"},
         "DestinationCidrBlock": "0.0.0.0/0",
         "GatewayId": {"Ref": "InternetGateway"}
-      }
+      },
+      "DependsOn": [
+        "InternetGateway"
+      ]
     },
     "SubnetRouteTableAssociation1": {
       "Type": "AWS::EC2::SubnetRouteTableAssociation",
